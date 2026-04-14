@@ -30,20 +30,21 @@ You will see these numbers yourself in this lab — they are not theoretical.
 ### Step 1 – Measure WASM startup time
 
 > 💡 **What is being timed here?**  
-> Each `wasmtime` invocation includes: loading the `.wasm` file from disk, validating it, JIT-compiling it to native code, instantiating (allocating memory and linking imports), and executing the `_start` function. The `real` time from `time` captures all of this end-to-end.
+> Each `wasmtime` invocation includes: loading the `.wasm` file from disk, validating it, JIT-compiling it to native code, instantiating (allocating memory and linking imports), and executing the `_start` function. The total wall-clock time at the end of each line captures all of this end-to-end.
+
+> ⚠️ **zsh vs bash:** zsh's `time` prints a single summary line per command (e.g. `0.01s user 0.00s system 99% cpu 0.007 total`) — the last number is the wall-clock total. The `grep real` pattern used in bash won't match; just read the `total` value directly.
 
 ```bash
 cd module-03-performance-security/labs/lab-3a-startup
-
-# Build the WASM module
 cargo build --target wasm32-wasip1 --release 2>/dev/null
 
-# Run 10 times and measure
 echo "=== WASM Startup Times ==="
 for i in {1..10}; do
-  { time wasmtime target/wasm32-wasip1/release/lab-3a-startup.wasm; } 2>&1 | grep real
+  { time wasmtime target/wasm32-wasip1/release/lab-3a-startup.wasm > /dev/null; } 2>&1
 done
 ```
+
+Expected: each line ends with something like `0.007 total` — roughly **5–15ms** per run.
 
 ### Step 2 – Build a comparable Docker container
 
@@ -54,15 +55,17 @@ done
 # Build the Docker image
 docker build -t wasm-vs-container-demo .
 
-# Warm up (pull layers)
+# Warm up (pull layers, prime caches)
 docker run --rm wasm-vs-container-demo
 
 # Measure cold starts (force new container each time)
 echo "=== Docker Startup Times ==="
 for i in {1..10}; do
-  { time docker run --rm wasm-vs-container-demo; } 2>&1 | grep real
+  { time docker run --rm wasm-vs-container-demo > /dev/null; } 2>&1
 done
 ```
+
+Expected: each line ends with something like `0.200 total` — roughly **200–500ms** per run.
 
 ### Step 3 – AOT Compilation (even faster)
 
@@ -121,19 +124,19 @@ cargo build --target wasm32-wasip1 --release
 
 ```bash
 echo "=== Native (x86_64) ==="
-time ./target/release/lab-3b-benchmark
+{ time ./target/release/lab-3b-benchmark > /dev/null; } 2>&1
 
 echo ""
 echo "=== WASM (Wasmtime JIT) ==="
-time wasmtime target/wasm32-wasip1/release/lab-3b-benchmark.wasm
+{ time wasmtime target/wasm32-wasip1/release/lab-3b-benchmark.wasm > /dev/null; } 2>&1
 
 echo ""
 echo "=== WASM (AOT compiled) ==="
 wasmtime compile target/wasm32-wasip1/release/lab-3b-benchmark.wasm -o bench.cwasm
-time wasmtime run --allow-precompiled bench.cwasm
+{ time wasmtime run --allow-precompiled bench.cwasm > /dev/null; } 2>&1
 ```
 
-> 💡 WASM typically runs within 10–20% of native speed for CPU-bound tasks.
+> 💡 **Reading the results (zsh):** Each `time` line shows `Xs user Ys system Z% cpu W total`. The `total` is wall-clock time; `user` is CPU time spent in your process. For comparing compute performance, `user` is the most meaningful — it excludes process startup and OS scheduling noise.
 
 ---
 
