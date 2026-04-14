@@ -173,7 +173,22 @@ wasmtime --invoke mem_grow memory.wasm 1
 wasmtime --invoke mem_size memory.wasm
 ```
 
-> **Try this:** What happens if you call `load` at address 0? At address 70000 (beyond one page)? The first may return garbage data (uninitialized memory is zeroed in WASM, so actually 0). The second will trap — observe the exact error message Wasmtime gives you.
+> **Try this:** What happens if you load from address 0, or from address 70000 (beyond one page)?
+>
+> ```bash
+> # Address 0 — always zero (WASM zeroes all memory on init)
+> wasmtime --invoke load memory.wasm 0
+> # Output: 0
+>
+> # Address 70000 — beyond the 64KB page boundary, should trap
+> wasmtime --invoke load memory.wasm 70000
+> # Output: memory fault at wasm address 0x11170 in linear memory of size 0x10000
+> #         wasm trap: out of bounds memory access
+> ```
+>
+> The trap is clean and descriptive — Wasmtime tells you exactly which address was accessed and the size of the memory region. No crash, no undefined behaviour, no security hole.
+>
+> You may also see a warning about `--invoke` being experimental for functions with arguments/return values — this is a Wasmtime CLI warning, not an error. The behaviour is correct.
 
 ---
 
