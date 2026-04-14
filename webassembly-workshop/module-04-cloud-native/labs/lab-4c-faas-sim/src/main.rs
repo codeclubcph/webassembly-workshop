@@ -11,22 +11,22 @@ fn instantiate(engine: &Engine, module: &Module) -> Result<(Store<()>, Instance)
 }
 
 fn invoke(store: &mut Store<()>, instance: &Instance, event_json: &str) -> Result<String, anyhow::Error> {
-    let alloc = instance.get_typed_func::<i32, i32>(store, "alloc")?;
-    let handle_event = instance.get_typed_func::<(i32, i32), i64>(store, "handle_event")?;
+    let alloc       = instance.get_typed_func::<i32, i32>(&mut *store, "alloc")?;
+    let handle_event = instance.get_typed_func::<(i32, i32), i64>(&mut *store, "handle_event")?;
 
     let bytes = event_json.as_bytes();
-    let ptr = alloc.call(store, bytes.len() as i32)?;
+    let ptr = alloc.call(&mut *store, bytes.len() as i32)?;
 
-    let memory = instance.get_memory(store, "memory")
+    let memory = instance.get_memory(&mut *store, "memory")
         .ok_or_else(|| anyhow::anyhow!("no memory"))?;
-    memory.write(store, ptr as usize, bytes)?;
+    memory.write(&mut *store, ptr as usize, bytes)?;
 
-    let packed = handle_event.call(store, (ptr, bytes.len() as i32))?;
+    let packed = handle_event.call(&mut *store, (ptr, bytes.len() as i32))?;
     let out_ptr = (packed >> 32) as usize;
     let out_len = (packed & 0xFFFF_FFFF) as usize;
 
     let mut buf = vec![0u8; out_len];
-    memory.read(store, out_ptr, &mut buf)?;
+    memory.read(&*store, out_ptr, &mut buf)?;
     Ok(String::from_utf8(buf)?)
 }
 

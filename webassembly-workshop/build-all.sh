@@ -2,7 +2,8 @@
 # build-all.sh – Builds every lab in the workshop
 # Run from the root of the webassembly-workshop directory
 
-set -e
+# Do NOT use set -e: bash arithmetic (( n++ )) returns exit code 1 when
+# the result is 0, which would cause the script to abort unexpectedly.
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 WASM_TARGET="wasm32-wasip1"
@@ -16,10 +17,10 @@ build_wasm() {
   echo -n "  Building $label ... "
   if (cd "$dir" && cargo build --target $WASM_TARGET --release -q 2>/dev/null); then
     echo "✅"
-    ((OK++))
+    OK=$((OK + 1))
   else
     echo "❌"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
   fi
 }
 
@@ -29,10 +30,10 @@ build_native() {
   echo -n "  Building $label (native) ... "
   if (cd "$dir" && cargo build --release -q 2>/dev/null); then
     echo "✅"
-    ((OK++))
+    OK=$((OK + 1))
   else
     echo "❌"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
   fi
 }
 
@@ -43,10 +44,10 @@ compile_wat() {
   echo -n "  Compiling $label ... "
   if wasm-tools parse "$wat" -o "$wasm" 2>/dev/null; then
     echo "✅"
-    ((OK++))
+    OK=$((OK + 1))
   else
     echo "❌  (is wasm-tools installed?)"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
   fi
 }
 

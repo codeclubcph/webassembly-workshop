@@ -3,7 +3,7 @@
 
 #[no_mangle]
 pub extern "C" fn alloc(size: i32) -> i32 {
-    let mut buf = Vec::with_capacity(size as usize);
+    let mut buf = Vec::<u8>::with_capacity(size as usize);
     let ptr = buf.as_mut_ptr() as i32;
     std::mem::forget(buf);
     ptr

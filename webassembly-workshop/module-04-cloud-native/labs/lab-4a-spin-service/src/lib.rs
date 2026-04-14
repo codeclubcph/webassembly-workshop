@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Main HTTP handler – dispatches based on path
 #[http_component]
 fn handle_request(req: Request) -> anyhow::Result<impl IntoResponse> {
-    let path = req.uri().path();
+    let path = req.path();
 
     let response = match path {
         "/health"       => handle_health(),
