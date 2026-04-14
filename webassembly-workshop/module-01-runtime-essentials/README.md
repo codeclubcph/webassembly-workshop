@@ -158,22 +158,32 @@ Run interactively with Wasmtime's `--invoke` flag:
 > 💡 **What is `--invoke` doing?**  
 > Instead of calling the `_start` entry point (what `main()` maps to), `--invoke` calls any exported function by name and passes arguments directly. This lets you poke at individual functions as if they were a library — great for exploration and testing.
 
+> ⚠️ **Important:** Each `wasmtime --invoke` call is a **separate process** with a **fresh module instance**. Memory is re-initialised to zero every time. This means `store` and `load` in separate calls won't share state — you'll see `load` return 0 even after a `store`. Similarly, `mem_grow` in one call won't affect `mem_size` in the next call. This is expected behaviour for the CLI tool.
+
 ```bash
 # Store value 42 at address 100
 wasmtime --invoke store memory.wasm 100 42
+# (no output — void function)
 
-# Load value from address 100 — should return 42
+# Load from address 100 — returns 0, NOT 42
+# because this is a NEW instance; the store above is gone
 wasmtime --invoke load memory.wasm 100
+# Output: 0
 
-# Get memory size (should be 1 page = 64 KB)
+# Get memory size — always 1 page on a fresh instance
 wasmtime --invoke mem_size memory.wasm
+# Output: 1
 
-# Grow by 1 page (returns the OLD size — 1)
+# Grow by 1 page — returns OLD size (1), but this instance is discarded after
 wasmtime --invoke mem_grow memory.wasm 1
+# Output: 1
 
-# Check new size — should now be 2
+# mem_size still shows 1 — a new fresh instance was started
 wasmtime --invoke mem_size memory.wasm
+# Output: 1
 ```
+
+> 💡 **Key insight:** Linear memory isolation works *within* a single running instance — not across separate process invocations. To observe persistent state across multiple calls, you'd need a host program that keeps the instance alive (like in Lab 2C). The `--invoke` flag is useful for testing a single function call, not for simulating stateful interactions.
 
 > **Try this:** What happens if you load from address 0, or from address 70000 (beyond one page)?
 >
