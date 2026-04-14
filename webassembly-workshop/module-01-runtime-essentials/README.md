@@ -74,6 +74,7 @@ File contents (`hello.wat`):
 > It reads the text format (WAT) and encodes it as the binary WASM format. The output file is identical in meaning — just a more compact representation that runtimes can load faster. The binary always starts with the 4-byte magic number `\0asm` (hex: `00 61 73 6D`).
 
 ```bash
+cd module-01-runtime-essentials/labs/lab-1a
 wasm-tools parse hello.wat -o hello.wasm
 ```
 
@@ -146,6 +147,7 @@ File contents (`memory.wat`):
 ```
 
 ```bash
+cd module-01-runtime-essentials/labs/lab-1b
 wasm-tools parse memory.wat -o memory.wasm
 wasm-tools validate memory.wasm
 wasm-tools print memory.wasm
@@ -224,6 +226,7 @@ File contents (`calc.wat`):
 ```
 
 ```bash
+cd module-01-runtime-essentials/labs/lab-1c
 wasm-tools parse calc.wat -o calc.wasm
 wasmtime --invoke compute calc.wasm
 # Expected: 43
