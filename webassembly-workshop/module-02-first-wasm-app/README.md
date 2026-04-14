@@ -116,7 +116,7 @@ wasmtime target/wasm32-wasip1/release/lab-2b-fileio.wasm
 
 ```bash
 # Create test data
-echo "Secret data from the host!" > /tmp/wasm-test.txt
+echo 'Secret data from the host!' > /tmp/wasm-test.txt
 
 # Grant access to /tmp only
 wasmtime --dir /tmp target/wasm32-wasip1/release/lab-2b-fileio.wasm /tmp/wasm-test.txt
