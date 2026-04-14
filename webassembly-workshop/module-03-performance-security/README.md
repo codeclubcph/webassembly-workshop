@@ -79,7 +79,7 @@ wasmtime compile target/wasm32-wasip1/release/lab-3a-startup.wasm \
 
 echo "=== WASM AOT Startup Times ==="
 for i in {1..10}; do
-  { time wasmtime run --allow-precompiled lab-3a-startup.cwasm; } 2>&1 | grep real
+  { time wasmtime run --allow-precompiled lab-3a-startup.cwasm > /dev/null; } 2>&1
 done
 ```
 
