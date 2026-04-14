@@ -1,0 +1,10 @@
+# Register Wasmtime as a K8s RuntimeClass
+# Requires: containerd + runwasi shim installed on nodes
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: wasmtime
+handler: wasmtime
+scheduling:
+  nodeSelector:
+    runtime: wasm   # Only schedule on nodes with WASM support

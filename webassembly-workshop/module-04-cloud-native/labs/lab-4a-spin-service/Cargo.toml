@@ -1,0 +1,11 @@
+[package]
+name = "lab-4a-spin-service"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+spin-sdk = "3"
+anyhow = "1"

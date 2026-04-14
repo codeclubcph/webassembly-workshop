@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wasm-microservice
+  labels:
+    app: wasm-microservice
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: wasm-microservice
+  template:
+    metadata:
+      labels:
+        app: wasm-microservice
+      annotations:
+        # Tells the containerd WASM shim how to handle this image
+        module.wasm.image/variant: compat-smart
+    spec:
+      # Use the WASM RuntimeClass instead of the default container runtime
+      runtimeClassName: wasmtime
+      containers:
+        - name: wasm-microservice
+          # OCI image containing the .wasm binary (not a Linux ELF)
+          image: ghcr.io/example/wasm-microservice:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: LOG_LEVEL
+              value: "info"
+          resources:
+            requests:
+              memory: "8Mi"
+              cpu: "25m"
+            limits:
+              memory: "32Mi"   # WASM modules are tiny!
+              cpu: "100m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 1   # Nearly instant startup
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 1
+            periodSeconds: 5
