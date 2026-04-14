@@ -60,12 +60,24 @@ wasmtime target/wasm32-wasip1/release/lab-2a-hello.wasm
 # File size
 ls -lh target/wasm32-wasip1/release/lab-2a-hello.wasm
 
-# Section overview
-wasm-tools objdump -x target/wasm32-wasip1/release/lab-2a-hello.wasm | head -40
+# Section overview — shows every section, its byte range, size, and item count
+wasm-tools objdump target/wasm32-wasip1/release/lab-2a-hello.wasm
 
-# How many functions are exported?
-wasm-tools objdump -x target/wasm32-wasip1/release/lab-2a-hello.wasm | grep Export
+# What functions are exported?
+wasm-tools print target/wasm32-wasip1/release/lab-2a-hello.wasm | grep export
 ```
+
+Expected output (section overview):
+```
+  types     |   0xa -   0x87 |  125 bytes | 17 count
+  imports   |  0x8a -  0x16a |  224 bytes | 6 count
+  functions | 0x16d -  0x248 |  219 bytes | 217 count
+  ...
+  code      | 0x2ea - 0xcb26 | 51260 bytes | 217 count
+  data      | 0xcb29 - 0xf30f | 10214 bytes | 2 count
+```
+
+> 💡 **217 functions for a hello world?** That's the Rust standard library — allocator, panic handler, formatting machinery, WASI glue. The `code` section alone is ~50 KB. Compare this to the 9-byte code section in the `add.wasm` WAT example. This is the cost of bringing std — worthwhile for real programs, but visible here.
 
 ---
 
