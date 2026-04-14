@@ -48,12 +48,6 @@ webassembly-workshop/
 ├── README.md                     ← This file
 ├── setup/                        ← Environment setup instructions
 │   └── README.md
-├── slides/                       ← Presenter notes & slide outlines
-│   ├── 00-intro.md
-│   ├── 01-runtime-essentials.md
-│   ├── 02-first-wasm-app.md
-│   ├── 03-performance-security.md
-│   └── 04-cloud-native.md
 ├── module-01-runtime-essentials/  ← Module 1 labs
 │   ├── README.md
 │   └── labs/

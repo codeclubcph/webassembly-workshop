@@ -96,14 +96,3 @@ prebuilt-wasm/
 4. **The ecosystem is moving fast** — WASI 0.2, Component Model, WasmGC are all recent
 
 ---
-
-## Slide Deck Reference
-
-| Slides file | Covers |
-|-------------|--------|
-| `slides/00-intro.md` | Welcome, WASM overview, why now |
-| `slides/01-runtime-essentials.md` | Execution model, WAT, WASI, runtimes |
-| `slides/02-first-wasm-app.md` | Rust→WASM, Wasmtime CLI, embedding |
-| `slides/03-performance-security.md` | Benchmarks, security model comparison |
-| `slides/04-cloud-native.md` | Spin, plugins, FaaS, K8s, edge |
-| `slides/05-wrapup.md` | Resources, next steps, Q&A |
