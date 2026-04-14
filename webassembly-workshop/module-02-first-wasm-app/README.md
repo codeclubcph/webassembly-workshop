@@ -173,22 +173,32 @@ cargo run
 
 Expected output:
 ```
-Loaded WASM module: wasm-guest/target/wasm32-wasip1/release/wasm_guest.wasm
-Calling WASM function: add(10, 32)
-Result: 42
-Calling WASM function: add(100, 200)
-Result: 300
+🔧 Initializing Wasmtime engine...
+📦 Loading WASM module: wasm-guest/target/wasm32-wasip1/release/wasm_guest.wasm
+🏗  Instantiating module...
+
+✅ Calling WASM function: multiply(10, 32)
+   Result: 320
+✅ Calling WASM function: multiply(100, 200)
+   Result: 20000
+
+✅ Calling WASM function: multiply(6, 7)
+   Result: 42
+
+✅ Calling WASM function: fibonacci(10)
+   Result: 55
+
+🎉 All WASM calls completed successfully!
 ```
 
-### Step 3 – Explore
+### Step 3 – Explore the host code
+
+Open `host/src/main.rs` and read through it. The guest exports three functions — `add`, `multiply`, and `fibonacci` — all defined in `wasm-guest/src/lib.rs`.
 
 > 💡 **Why does `get_typed_func::<(i32, i32), i32>` fail at runtime rather than compile time if the types are wrong?**  
 > The Rust generic parameters encode what *you expect* the WASM export's signature to be. Wasmtime checks this against the actual module signature at instantiation time. If they don't match, you get a clear runtime error — not a silent type confusion or crash. This is much safer than raw FFI.
 
-Modify `host/src/main.rs` to:
-1. Call `multiply` instead of `add`
-2. Pass different arguments
-3. Add error handling for out-of-range inputs
+**Try it:** In `host/src/main.rs`, change `"multiply"` to `"add"` (which also exists in the guest) and re-run — it should work identically since both have the same `(i32, i32) -> i32` signature. Then try requesting a function that doesn't exist (e.g. `"subtract"`) and observe the error message you get from Wasmtime.
 
 ---
 
