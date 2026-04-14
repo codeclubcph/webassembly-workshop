@@ -13,15 +13,13 @@ By the end of this module you will be able to:
 
 ---
 
-## Background Reading
-
-See [slides/04-cloud-native.md](../slides/04-cloud-native.md)
-
----
-
 ## Lab 4A – HTTP Microservice with Fermyon Spin
 
 **Goal:** Build a WASM-based HTTP microservice that responds to requests.
+
+**What you'll learn:** Fermyon Spin is a framework built specifically for WASM-first microservices. Instead of writing a `main()` loop that listens on a socket, you write a *handler function* — Spin owns the HTTP server, the TCP socket, the TLS termination, and the routing table. Your WASM module just implements the handler. This is the same model as AWS Lambda or Azure Functions, but with WASM-speed cold starts (sub-millisecond) instead of container-speed cold starts (seconds).
+
+Spin's `spin.toml` manifest declares capabilities at the component level — which routes it handles, which outbound hosts it may call, which key-value stores it may access. This is WASI's capability model applied to cloud services: the module cannot reach any network destination that isn't listed in the manifest.
 
 ### Step 1 – Install Spin
 
@@ -52,6 +50,8 @@ spin build
 spin up
 ```
 
+> 💡 **What `spin build` does:** It calls `cargo build --target wasm32-wasip1 --release` under the hood (using the `[component.build]` section of `spin.toml`), then packages the resulting `.wasm` file. `spin up` loads the WASM module into its embedded Wasmtime engine, instantiates one instance per route, and starts the HTTP listener — all before it prints "Serving http://127.0.0.1:3000".
+
 ### Step 5 – Test the endpoints
 
 ```bash
@@ -74,13 +74,17 @@ curl http://127.0.0.1:3000/info
 time curl -s http://127.0.0.1:3000/health
 ```
 
-> Notice: there is no meaningful startup delay even for the very first request.
+> 💡 **Why no startup delay?** In a container-based FaaS (e.g., AWS Lambda backed by Firecracker), the first request to a cold function must wait for the microVM to boot. With Spin, the WASM module is already instantiated before `spin up` finishes printing to the terminal. The "first request" is warm by the time you send it, because instantiation is so fast it happens at server startup rather than at request time.
 
 ---
 
 ## Lab 4B – WASM as a Plugin System
 
 **Goal:** Build a host application that loads user-supplied WASM "plugin" modules.
+
+**What you'll learn:** The plugin pattern is one of WASM's killer use cases in production today. Shopify uses it for storefront extensions, Envoy Proxy uses it for custom filter chains, Figma uses it for design plugins, and Zed editor uses it for language extensions. The core insight is: you want user-submitted or third-party code to run inside your process (for performance — no IPC overhead) but you cannot trust it (for security — it must not read your data or crash your server). WASM gives you both. The host app exposes *only* the functions it chooses to expose as imports; the plugin can call nothing else.
+
+String passing is the most instructive part of this lab. WASM functions can only pass numeric types (`i32`, `i64`, `f32`, `f64`) across the module boundary — there's no "pass a string" instruction. The convention for strings is: allocate memory in the module's linear memory, write the bytes there, and pass a (pointer, length) pair as two `i32` arguments. The host reads or writes those bytes directly via the module's exported `memory`. You will see this pattern in the plugin's exported `alloc`, `transform`, and `dealloc` functions.
 
 This demonstrates the extension/plugin pattern used by Envoy, Shopify, etc.
 
@@ -132,11 +136,17 @@ Applying plugin: wordcount
   → Word count: 4
 ```
 
+> 💡 **Why can't the plugin escape?** Each plugin is instantiated with an empty set of WASI imports — the host wires up no filesystem, no network, no environment variables. The plugin's `transform` function receives bytes, transforms them, and writes the result. It has no mechanism to do anything else, because there are no other imports to call. This is why Shopify can safely run merchant-authored code in their checkout pipeline: even a deliberately malicious merchant plugin cannot read another merchant's cart data.
+
 ---
 
 ## Lab 4C – Simulating Serverless: Cold Start vs Warm Request
 
 **Goal:** Simulate the FaaS (Function-as-a-Service) execution model with WASM.
+
+**What you'll learn:** In a FaaS platform, "cold start" means the platform must load, instantiate, and initialise your function's runtime environment before it can handle the first request. For a Node.js Lambda, that can mean 300–1000ms. For a JVM function, sometimes multiple seconds. Platforms like Fastly Compute and wasmCloud solve this by using WASM: instantiation takes under 1ms, so it's economically viable to *instantiate fresh per request* rather than keeping warm instances around.
+
+This has architectural implications. Warm instances introduce subtle bugs: global state from one request leaks into the next. Fresh-per-request instantiation eliminates an entire class of bugs (accidental state sharing across tenants or requests) while costing less than 1ms. This lab makes that tradeoff concrete and measurable.
 
 This mimics how platforms like Fastly Compute or wasmCloud handle requests.
 
@@ -158,11 +168,17 @@ Try it:
 {"event": "payment.failed", "orderId": "abc123"}
 ```
 
+> 💡 **Reading the output:** You will see two timing columns — `instantiate` and `execute`. Notice that `instantiate` is consistently in the sub-millisecond range even for "cold" invocations. For the "warm" path the instantiation cost is amortised across many requests (the instance is reused from a pool). The key observation is that even the cold path is fast enough that per-request instantiation is practical — which eliminates all concerns about shared state between invocations by construction.
+
 ---
 
 ## Lab 4D – Kubernetes WASM Manifest (Discussion Lab)
 
 **Goal:** Understand how WASM workloads deploy on Kubernetes.
+
+**What you'll learn:** Kubernetes has always been container-centric, but since Kubernetes 1.20 it supports custom runtime classes via the `RuntimeClass` API and the containerd shim model. `runwasi` is a containerd shim that speaks the WASM execution model instead of the OCI container model. When the Kubernetes scheduler places a Pod with `runtimeClassName: wasmtime`, containerd hands the OCI image to the `runwasi` shim, which extracts the `.wasm` file and runs it with Wasmtime instead of starting a container. From Kubernetes' perspective it's just a Pod. From containerd's perspective it's a WASM module. No code changes in your orchestration layer.
+
+This matters because it means WASM workloads can use the entire existing Kubernetes ecosystem: Services, Ingress, HPA, PodDisruptionBudgets, GitOps tooling, Helm charts — everything works unchanged.
 
 > 📝 This lab is a review-and-discuss exercise — no live K8s cluster required.
 
@@ -180,10 +196,14 @@ Files:
 ### Key differences from container deployments
 
 Review `deployment.yaml` and note:
-- `spec.template.spec.runtimeClassName: wasmtime` → uses WASM shim
+- `spec.template.spec.runtimeClassName: wasmtime` → uses WASM shim instead of runc
 - Image is a standard OCI image but contains `.wasm` instead of ELF binaries
 - Very low resource requests (`memory: "16Mi"`, `cpu: "50m"`)
 - Annotation `module.wasm.image/variant: compat-smart`
+
+> 💡 **Why so little memory?** A typical containerised Go or Java microservice requests 128–512Mi just to start the runtime. WASM modules have no garbage collector, no JIT warm-up heap, and no OS inside the image. The `memory: "16Mi"` request is realistic for many WASM workloads, not a typo. This means you can run far more WASM Pods per node than container Pods — which directly reduces infrastructure cost.
+
+> 💡 **What `compat-smart` means:** OCI images containing WASM modules use an annotation to tell the containerd shim whether the module targets WASI preview 1 (`compat`) or the newer WASI Component Model (`compat-smart` lets the shim auto-detect). This is just a hint for the shim — the WASM binary itself is unchanged.
 
 ### Discussion Questions
 
@@ -198,6 +218,17 @@ Review `deployment.yaml` and note:
 
 **Goal:** Apply the decision framework to real scenarios.
 
+**What you'll learn:** There is no universal answer to "should I use WASM or containers?" The right choice depends on the shape of the workload, the trust model, the cold-start budget, and the operational environment. This exercise forces you to articulate *why* one approach fits better — that reasoning process is what you'll take back to your team.
+
+Use these decision criteria as a guide:
+- **Cold-start sensitivity?** WASM wins if requests must be served in <10ms from a cold state
+- **Untrusted code?** WASM wins if you cannot trust the code (plugin, user-submitted function)
+- **Long-running jobs (>30s)?** Containers win — WASM has no benefit over long durations
+- **GPU / native hardware?** Containers win — WASM has no GPU access path today
+- **Existing ecosystem (DBs, messaging)?** Containers win — WASM database client libraries are immature
+- **High tenant count?** WASM wins — lower per-instance overhead means more tenants per host
+- **Multi-language requirement?** WASM is language-agnostic; both options support polyglot
+
 Work in pairs or small groups. For each scenario, decide:
 - **Container**, **WASM**, or **Hybrid**? 
 - Justify your choice using the criteria from Module 3.
@@ -206,13 +237,23 @@ Work in pairs or small groups. For each scenario, decide:
 
 **Scenario A:** An e-commerce platform runs checkout discount logic for 50,000 stores. Each store has custom rules. The rules change frequently. Average function duration: 2ms.
 
+> *Hint: Think about trust (merchant-authored code), tenant count, and cold-start frequency.*
+
 **Scenario B:** A social media platform needs to run user-submitted video transcoding jobs. Jobs can run for minutes. They need GPU access.
+
+> *Hint: Check the GPU criterion above. WASM has no GPU access path today.*
 
 **Scenario C:** A CDN wants to run A/B testing logic at 300 PoPs globally. Each request needs 1–5ms of logic. Cold starts happen on every PoP for every new deployment.
 
+> *Hint: 300 PoPs means 300 cold starts per deployment. What's the cold-start cost in each model?*
+
 **Scenario D:** A FinTech company processes payment events from a Kafka topic. Processing takes 50–500ms per event. It requires a PostgreSQL connection.
 
+> *Hint: PostgreSQL client libraries and Kafka consumer groups are mature in containers. What's the WASM ecosystem story here?*
+
 **Scenario E:** A SaaS platform allows customers to write custom data transformation functions in Python or JavaScript. Functions process uploaded files. Strong isolation is required.
+
+> *Hint: Python and JavaScript can compile to WASM (via Wizer/Javy). The "strong isolation" requirement is the key discriminator here.*
 
 ---
 

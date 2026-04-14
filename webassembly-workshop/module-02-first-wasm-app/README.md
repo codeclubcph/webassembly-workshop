@@ -13,27 +13,31 @@ By the end of this module you will be able to:
 
 ---
 
-## Background Reading
-
-See [slides/02-first-wasm-app.md](../slides/02-first-wasm-app.md)
-
 ---
 
 ## Lab 2A – Hello World in Rust → WASM
 
 **Goal:** Compile your first Rust program to WASM and run it with Wasmtime.
 
-### Step 1 – Create project
+**What you'll learn:** Rust has first-class WASM support — the `wasm32-wasip1` target tells the compiler to produce a WASM binary instead of a native x86/ARM executable. The resulting `.wasm` file is entirely self-contained and will run identically on macOS, Linux, Windows, or any other platform with Wasmtime installed. You don't change a single line of your Rust source code.
+
+> 💡 **What does `wasm32-wasip1` mean?**  
+> Breaking it down: `wasm32` = 32-bit WebAssembly architecture, `wasi` = WebAssembly System Interface (the OS abstraction layer), `p1` = Preview 1 (the stable, widely-supported WASI version). There is also `wasm32-wasip2` (using WASI 0.2 and the Component Model) — p1 is what most tooling supports today.
+
+> 💡 **Why `--release`?**  
+> Debug builds include extensive debug info and skip optimisations. A debug WASM binary can be 5–10× larger and slower than a release build. Always use `--release` for any benchmarking or deployment.
+
+### Step 1 – Navigate to the project
+
+The project is already set up for you at `labs/lab-2a-hello/`.
 
 ```bash
-cd module-02-first-wasm-app/labs
-cargo new lab-2a-hello
-cd lab-2a-hello
+cd module-02-first-wasm-app/labs/lab-2a-hello
 ```
 
-### Step 2 – Write the program
+### Step 2 – Read the program
 
-Edit `src/main.rs` (already created for you in `labs/lab-2a-hello/src/main.rs`).
+Open `src/main.rs` and read through it. It's a standard Rust `main()` that prints to stdout — no WASM-specific code at all. That's the point: you write normal Rust, the compiler handles the rest.
 
 ### Step 3 – Build for WASM
 
@@ -48,6 +52,9 @@ wasmtime target/wasm32-wasip1/release/lab-2a-hello.wasm
 ```
 
 ### Step 5 – Inspect the output binary
+
+> 💡 **Why is the binary so large compared to the WAT examples in Module 1?**  
+> The Rust standard library (std) is compiled into the binary — it includes memory allocators, panic handlers, formatting code, and WASI glue. For a "hello world" this feels wasteful, but for real programs it means you get the full power of Rust's ecosystem. Tools like `wasm-opt` (from Binaryen) can strip unused code significantly.
 
 ```bash
 # File size
@@ -66,6 +73,10 @@ wasm-tools objdump -x target/wasm32-wasip1/release/lab-2a-hello.wasm | grep Expo
 
 **Goal:** Read from a file using WASI, and learn how capability grants work.
 
+**What you'll learn:** WASI uses a *capability-based security model*. The module declares what it needs (e.g. `wasi:filesystem`), but the host decides at runtime what it actually gets. If you don't grant a capability, the module cannot use it — not by policy, but because the import simply isn't wired up. This is fundamentally different from Linux process permissions, where a process inherits everything the user has access to by default.
+
+This lab makes that concrete: the same binary either works or fails depending entirely on what you pass to `wasmtime`.
+
 ### The code (`labs/lab-2b-fileio/src/main.rs` — already provided)
 
 It reads a text file from disk and prints its content.
@@ -79,12 +90,17 @@ cargo build --target wasm32-wasip1 --release
 
 ### Run WITHOUT filesystem access (should fail)
 
+> 💡 **Why does this fail?** The module imports `wasi:filesystem/types` functions, but Wasmtime doesn't link them to any real directory. The first filesystem call returns an error code, and the program exits with an error. The sandbox is working exactly as intended.
+
 ```bash
 wasmtime target/wasm32-wasip1/release/lab-2b-fileio.wasm
 # Expect: error – no access to host filesystem
 ```
 
 ### Run WITH filesystem access (grant the capability)
+
+> 💡 **What does `--dir /tmp` actually do?**  
+> It tells Wasmtime to map the host directory `/tmp` into the module's virtual filesystem namespace. From inside the WASM module, the path still looks like `/tmp` — but it's sandboxed: the module can't use `../` tricks to escape to the real root filesystem because the runtime intercepts every path operation and validates it against the granted list.
 
 ```bash
 # Create test data
@@ -98,6 +114,8 @@ wasmtime --dir /tmp target/wasm32-wasip1/release/lab-2b-fileio.wasm /tmp/wasm-te
 
 ### Try to access a path NOT granted
 
+> 💡 **Note the error type.** It's not a crash or undefined behaviour — it's a clean `EACCES` (permission denied) returned from the WASI syscall. The module handles the error gracefully. This predictability is a core WASM safety property.
+
 ```bash
 wasmtime --dir /tmp target/wasm32-wasip1/release/lab-2b-fileio.wasm /etc/passwd
 # Expect: permission denied – sandbox working correctly!
@@ -108,6 +126,14 @@ wasmtime --dir /tmp target/wasm32-wasip1/release/lab-2b-fileio.wasm /etc/passwd
 ## Lab 2C – Embedding WASM in a Rust Host
 
 **Goal:** Call a WASM function from a Rust host program using the Wasmtime API.
+
+**What you'll learn:** The Wasmtime CLI is convenient, but in production WASM is usually embedded inside a larger application — this is the *embedding* pattern. Your application becomes the host: it loads the `.wasm` file, controls what capabilities the module gets, calls exported functions, and processes the results. This is exactly how Spin, WasmEdge, and Envoy work internally.
+
+The key Wasmtime concepts you'll see in the host code:
+- **`Engine`** — the JIT/AOT compiler, shared and reused across many modules
+- **`Module`** — a compiled WASM module, reusable across many instances
+- **`Store`** — the runtime state for one instance (memory, globals, tables); isolated per request in production
+- **`Instance`** — a running copy of a module, bound to one Store
 
 ### Overview
 
@@ -144,6 +170,9 @@ Result: 300
 
 ### Step 3 – Explore
 
+> 💡 **Why does `get_typed_func::<(i32, i32), i32>` fail at runtime rather than compile time if the types are wrong?**  
+> The Rust generic parameters encode what *you expect* the WASM export's signature to be. Wasmtime checks this against the actual module signature at instantiation time. If they don't match, you get a clear runtime error — not a silent type confusion or crash. This is much safer than raw FFI.
+
 Modify `host/src/main.rs` to:
 1. Call `multiply` instead of `add`
 2. Pass different arguments
@@ -154,6 +183,8 @@ Modify `host/src/main.rs` to:
 ## Lab 2D – Environment Variables & Arguments (Bonus)
 
 **Goal:** Pass environment variables and CLI args to WASM.
+
+**What you'll learn:** Just like filesystem access, environment variables are a capability that must be explicitly granted. A WASM module cannot read the host's `PATH`, `HOME`, `AWS_SECRET_ACCESS_KEY`, or any other variable unless the host deliberately passes it. This is important for secrets hygiene — a compromised dependency inside your WASM module cannot silently exfiltrate credentials from the environment.
 
 ```bash
 cd labs/lab-2d-envargs
@@ -166,6 +197,8 @@ wasmtime \
   target/wasm32-wasip1/release/lab-2d-envargs.wasm \
   -- --port 8080 --verbose
 ```
+
+> **Try this:** Run the module *without* `--env` and observe that it sees an empty environment. Then add only one of the two variables and see that the other is absent. This demonstrates selective environment exposure.
 
 ---
 

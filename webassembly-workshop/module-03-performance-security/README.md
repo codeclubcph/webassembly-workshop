@@ -13,15 +13,13 @@ By the end of this module you will be able to:
 
 ---
 
-## Background Reading
-
-See [slides/03-performance-security.md](../slides/03-performance-security.md)
-
----
-
 ## Lab 3A – Startup Time Benchmark
 
 **Goal:** Measure the cold-start time difference between WASM and Docker containers.
+
+**What you'll learn:** Cold-start latency is one of the most impactful practical differences between WASM and containers. A Docker container must go through kernel namespace creation, cgroup setup, overlay filesystem mounting, and process spawning before your first line of code runs. WASM skips all of that — the Wasmtime runtime validates and JIT-compiles the module, allocates linear memory, and starts executing in milliseconds. With AOT pre-compilation it's even faster: the binary is already native code, so startup is just a memory map and a function call.
+
+You will see these numbers yourself in this lab — they are not theoretical.
 
 ### Prerequisites
 
@@ -30,6 +28,9 @@ See [slides/03-performance-security.md](../slides/03-performance-security.md)
 - `time` command available (built into zsh/bash)
 
 ### Step 1 – Measure WASM startup time
+
+> 💡 **What is being timed here?**  
+> Each `wasmtime` invocation includes: loading the `.wasm` file from disk, validating it, JIT-compiling it to native code, instantiating (allocating memory and linking imports), and executing the `_start` function. The `real` time from `time` captures all of this end-to-end.
 
 ```bash
 cd module-03-performance-security/labs/lab-3a-startup
@@ -46,6 +47,9 @@ done
 
 ### Step 2 – Build a comparable Docker container
 
+> 💡 **Why Alpine?**  
+> The Dockerfile uses `alpine:3.19` — the smallest viable Linux container base image (~7 MB). This gives Docker the best possible chance. Even so, the kernel overhead of setting up namespaces and cgroups dominates the startup time regardless of image size.
+
 ```bash
 # Build the Docker image
 docker build -t wasm-vs-container-demo .
@@ -61,6 +65,9 @@ done
 ```
 
 ### Step 3 – AOT Compilation (even faster)
+
+> 💡 **What is AOT compilation?**  
+> `wasmtime compile` pre-compiles the `.wasm` binary to a `.cwasm` file containing native machine code for your CPU. When you run it with `--allow-precompiled`, Wasmtime skips the JIT step entirely — it's already native code. This is how Fastly Compute@Edge achieves sub-millisecond WASM startup in production.
 
 ```bash
 # Pre-compile WASM to native code (AOT)
@@ -87,6 +94,10 @@ done
 
 **Goal:** Compare WASM vs native execution on a CPU-bound task (Fibonacci).
 
+**What you'll learn:** WASM is not a bytecode interpreter — Wasmtime compiles it to native machine code before running it. The main source of overhead compared to a raw native binary is *bounds-checked memory accesses*: every `load` and `store` instruction checks that the address is within the module's linear memory. Modern CPUs and runtimes use guard pages to elide most of these checks, so the overhead is typically 10–20% for compute-heavy code. For I/O-bound workloads (most web services), the overhead is negligible because the bottleneck is the network, not the CPU.
+
+**Why Fibonacci(40)?** It's entirely CPU-bound (no I/O, no memory pressure), recursive, and takes long enough (~1 second) that timing noise is small relative to the measurement.
+
 ### The benchmark (`labs/lab-3b-benchmark/`)
 
 Computes `fibonacci(40)` natively (as a Rust binary) and as a WASM module.
@@ -105,6 +116,8 @@ cargo build --target wasm32-wasip1 --release
 ```
 
 ### Step 3 – Run and compare
+
+> 💡 **Reading the results:** The `real` time includes process startup. To isolate pure compute, look at `user` time (CPU time actually spent), which is more comparable between native and WASM.
 
 ```bash
 echo "=== Native (x86_64) ==="
@@ -128,6 +141,10 @@ time wasmtime run --allow-precompiled bench.cwasm
 
 **Goal:** Demonstrate that WASM cannot access resources beyond its grants.
 
+**What you'll learn:** WASM security is *structural*, not policy-based. A Linux container's security relies on seccomp filters and AppArmor profiles that must be correctly configured. If a syscall is missing from the filter, a malicious process can use it. WASM has no syscall instruction at all — the instruction set simply doesn't include one. Every interaction with the outside world must go through a typed WASI import that the host explicitly wires up. If the host doesn't wire it, the import doesn't exist, and the module cannot call it.
+
+In this lab the `lab-3c-security` binary plays the role of a "malicious" module — it tries several escape techniques, and you observe that all of them are blocked by the sandbox, not by any configuration on your part.
+
 ### Scenario: Malicious module
 
 The `labs/lab-3c-security/src/main.rs` file simulates a "malicious" WASM module that tries to:
@@ -147,20 +164,23 @@ wasmtime target/wasm32-wasip1/release/lab-3c-security.wasm
 # Run WITH only /tmp access
 echo "=== Test 2: Only /tmp granted ==="
 wasmtime --dir /tmp target/wasm32-wasip1/release/lab-3c-security.wasm
-# Only /tmp write should succeed
+# Only /tmp write should succeed — /etc/passwd is still unreachable
 
 # Run with specific env var only
 echo "=== Test 3: Specific env var ==="
 wasmtime --env ALLOWED_VAR=hello target/wasm32-wasip1/release/lab-3c-security.wasm
-# Only ALLOWED_VAR should be visible
+# Only ALLOWED_VAR should be visible — all other env vars are absent
 ```
+
+> 💡 **Key observation:** The failures are clean errors returned from WASI functions — not crashes, not undefined behaviour, not segfaults. The module handles each failure gracefully and reports what it could and couldn't access. This predictability is a core property of the sandbox: even adversarial code cannot cause unexpected host-side effects.
 
 ### Contrast: Container escape surface
 
 Discuss what a malicious container can access with default Docker settings:
-- All environment variables of the container
+- All environment variables of the container (including any secrets you accidentally injected)
 - Full view of container filesystem
-- Potential host escape via kernel exploits
+- Any syscall not blocked by the seccomp profile (default Docker allows ~300+ syscalls)
+- Potential host escape via kernel exploits (CVE-2019-5736 is a real example)
 
 ---
 
@@ -168,11 +188,28 @@ Discuss what a malicious container can access with default Docker settings:
 
 **Goal:** Show that two WASM modules cannot access each other's memory.
 
+**What you'll learn:** Two WASM modules running in the same OS *process* still cannot read each other's linear memory. In contrast, two native threads in the same process share the entire address space — one buggy or compromised thread can overwrite another's data. WASM's linear memory is fully isolated at the VM level: each module instance gets its own bounded region, and the engine enforces that every memory access stays within that region.
+
+This matters for multi-tenant systems (e.g., serverless platforms running untrusted user code) and plugin architectures (e.g., a plugin that shouldn't be able to exfiltrate data from another plugin). The isolation is free — you don't write any sandboxing code. It's a property of the WASM execution model itself.
+
 ```bash
 cd labs/lab-3d-isolation
-# See the demo script and explanation in this directory
+# Build the demo first
+cargo build --release
+cd wasm-guest && cargo build --target wasm32-wasip1 --release && cd ..
+# Run the isolation demo
 ./run-isolation-demo.sh
 ```
+
+**What to look for in the output:** The script prints memory contents from both modules before and after module A writes to its memory. You should see that module B's memory is completely unchanged — even though both modules are running inside the same OS process. Look for lines like:
+
+```
+[Module A] Writing 0xDEADBEEF to its own memory...
+[Module A] Memory[0] = 0xDEADBEEF
+[Module B] Memory[0] = 0x00000000  ← completely unaffected
+```
+
+> 💡 **How it works:** The demo uses the Wasmtime embedding API to spin up two `Store` instances within the same process. Each `Store` owns its own linear memory allocation — a separate `Vec<u8>` on the host heap. When module A writes to its memory, module B's `Store` sees none of it. The host (the Rust embedding code) would have to explicitly copy bytes between stores to enable communication, and that copying is the only legitimate cross-module channel. There is no shared memory segment, no shared pointer, and no way for either module to discover the other's address.
 
 The demo runs two WASM instances in the same process via the embedding API and shows:
 - Each has its own linear memory space
